@@ -26,6 +26,9 @@ Nunca se sube a este repositorio ni se comparte con nadie más.
   proveedor (sube el stock automáticamente al confirmar).
 - `dashboard.html` — panel de control de solo lectura: inventario actual,
   historial de pedidos y compras, y rentabilidad por variante.
+- `nuevo-producto.html` — agregar sets y colores nuevos al catalogo: crea el
+  producto y sus variantes en Airtable (con foto incluida), y genera el
+  fragmento de codigo listo para pegar en index.html y pedido-proveedor.html.
 
 Las dos apps incluyen las fotos de los 44 productos incrustadas como
 miniaturas, para funcionar sin depender de carpetas locales.
