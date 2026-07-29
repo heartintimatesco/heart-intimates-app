@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heart Intimates — Operación</title>
+<style>
+  :root{
+    --bg:#F5F7F6; --card:#FFF; --line:#DFE5E2; --dark:#1F332B;
+    --acc:#3F7A5A; --acc-dk:#2E5C43; --txt:#2A312E; --mut:#75837C;
+    --ok:#3F7A5A; --okbg:#E4EFE8; --err:#B5504A; --errbg:#F9E7E5;
+    --warn:#8A5A0E; --warnbg:#FCF0DA; --info:#3A5F8A; --infobg:#E5EDF6;
+  }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);
+       color:var(--txt);margin:0;padding:16px;line-height:1.5;font-size:15px}
+  .wrap{max-width:900px;margin:0 auto}
+  h1{font-family:Georgia,serif;color:var(--dark);font-size:23px;margin:0 0 2px;font-weight:400}
+  .sub{color:var(--mut);font-size:13px;margin:0 0 14px}
+  h2{font-size:14px;font-weight:600;color:var(--dark);margin:0 0 4px;
+     text-transform:uppercase;letter-spacing:.4px}
+  .h2nota{font-size:12px;color:var(--mut);margin:0 0 12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+        padding:16px;margin-bottom:14px}
+
+  .nav{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+  .nav a{font-size:12.5px;padding:6px 12px;border-radius:20px;text-decoration:none;
+         border:1px solid var(--line);color:var(--mut)}
+  .nav a.activo{background:var(--dark);color:#fff;border-color:transparent;font-weight:600}
+
+  .msg{padding:12px;border-radius:8px;font-size:14px;margin-bottom:12px;display:none}
+  .msg.ok{background:var(--okbg);color:var(--ok);display:block}
+  .msg.err{background:var(--errbg);color:var(--err);display:block}
+  .msg.info{background:var(--infobg);color:var(--info);display:block}
+
+  .config{background:var(--okbg);border:1px dashed var(--acc);border-radius:12px;
+          padding:14px 16px;margin-bottom:14px;font-size:13px}
+  .config a{color:var(--acc-dk)}
+  .config-row{display:flex;gap:8px;margin-top:8px}
+  input{width:100%;padding:10px 12px;border:1px solid var(--line);
+        border-radius:8px;font-size:15px;background:#fff}
+  button{background:var(--dark);color:#fff;border:none;padding:10px 16px;
+         border-radius:8px;font-size:14px;cursor:pointer}
+  button:hover{background:var(--acc-dk)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.alt{background:transparent;color:var(--dark);border:1px solid var(--line)}
+  button.alt:hover{background:#EDF3F0}
+  button.mini{padding:6px 11px;font-size:12.5px}
+  button.verde{background:var(--acc)}
+  button.verde:hover{background:var(--acc-dk)}
+
+  .resumen{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}
+  .rcard{background:var(--card);border:1px solid var(--line);border-radius:10px;
+         padding:12px 14px;text-align:center;cursor:pointer}
+  .rcard:hover{border-color:var(--acc)}
+  .rcard b{display:block;font-size:24px;color:var(--dark);line-height:1.1}
+  .rcard small{display:block;font-size:11.5px;color:var(--mut);margin-top:2px}
+  .rcard.urgente b{color:var(--err)}
+  .rcard.atencion b{color:var(--warn)}
+
+  .item{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#fff}
+  .item.destacado{border-color:var(--warn);background:#FFFCF5}
+  .item-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+  .item-tit b{font-size:15px;color:var(--dark)}
+  .item-tit small{display:block;font-size:12px;color:var(--mut)}
+  .item-monto{text-align:right;white-space:nowrap}
+  .item-monto b{font-size:16px;color:var(--dark)}
+  .item-monto small{display:block;font-size:11.5px;color:var(--mut)}
+  .item-prods{font-size:12.5px;color:var(--mut);margin-top:7px;padding-top:7px;border-top:1px solid var(--line)}
+  .item-acciones{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap;align-items:center}
+  .guia-input{width:auto;flex:1;min-width:130px;padding:7px 10px;font-size:13px}
+
+  .pill{display:inline-block;font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600}
+  .pill.nuevo{background:var(--infobg);color:var(--info)}
+  .pill.pago{background:var(--warnbg);color:var(--warn)}
+  .pill.empacado{background:var(--warnbg);color:var(--warn)}
+  .pill.enviado{background:var(--okbg);color:var(--ok)}
+  .pill.entregado{background:#E8E8E8;color:#666}
+  .pill.err{background:var(--errbg);color:var(--err)}
+
+  .vacio{color:var(--mut);font-size:14px;text-align:center;padding:24px;
+         background:#FAFBFA;border-radius:10px;border:1px dashed var(--line)}
+  .vacio b{display:block;color:var(--ok);font-size:15px;margin-bottom:2px}
+
+  .lote{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  .linea-recep{display:flex;align-items:center;gap:10px;padding:9px 0;
+               border-bottom:1px solid var(--line);font-size:14px}
+  .linea-recep:last-child{border-bottom:none}
+  .linea-recep input[type=checkbox]{width:19px;height:19px;flex-shrink:0}
+  .linea-recep .desc{flex:1}
+  .linea-recep .desc small{display:block;font-size:11.5px;color:var(--mut)}
+  .linea-recep .cant{font-weight:600;color:var(--dark);white-space:nowrap}
+  .grupo-compra{margin-bottom:16px}
+  .grupo-compra h3{font-size:13.5px;margin:0 0 2px;color:var(--dark)}
+  .grupo-compra .meta{font-size:12px;color:var(--mut);margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Operación</h1>
+<p class="sub">Heart Intimates · lo que hay que hacer hoy</p>
+<div class="nav">
+  <a href="index.html">Pedido cliente</a>
+  <a href="pedido-proveedor.html">Pedido proveedor</a>
+  <a href="operacion.html" class="activo">Operación</a>
+  <a href="dashboard.html">Panel de control</a>
+</div>
+
+<div id="msg" class="msg"></div>
+
+<div id="config" class="config">
+  <b>Conectar con Airtable</b> <span id="badge"></span>
+  <p style="margin:6px 0 0;color:var(--mut)">
+    Usa el mismo token de las otras apps, creado en
+    <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a>.
+  </p>
+  <div class="config-row">
+    <input id="token" type="password" placeholder="pat...">
+    <button onclick="guardarToken()">Guardar</button>
+  </div>
+</div>
+
+<div style="margin-bottom:16px">
+  <button class="alt" onclick="cargarTodo()">Actualizar</button>
+</div>
+
+<div class="resumen" id="resumen"></div>
+
+<div class="card">
+  <h2>Pedidos por atender</h2>
+  <p class="h2nota">Ordenados por antigüedad: lo que lleva más tiempo esperando va primero.</p>
+  <div id="lista-pedidos"></div>
+</div>
+
+<div class="card">
+  <h2>Recepción de mercancía</h2>
+  <p class="h2nota">
+    Marca lo que ya llegó. Al confirmar, el stock sube automáticamente y esos
+    productos quedan disponibles para vender.
+  </p>
+  <div id="lista-recepcion"></div>
+</div>
+
+<div class="card">
+  <h2>Entregados recientemente</h2>
+  <p class="h2nota">Últimos 10, por si hay que consultar algo.</p>
+  <div id="lista-entregados"></div>
+</div>
+
+</div>
+
+<script>
+const BASE_ID = "appBVPFSRXvHnoS96";
+const T_PEDIDOS = "tblZyQ9HNNQIRsimF";
+const T_DETALLE_VENTA = "tblOrV8Cva3DDxb09";
+const T_COMPRAS = "tblum45OxxlHknTRz";
+const T_DETALLE_COMPRA = "tblhSZbhVHlwEospg";
+
+const FLUJO = {
+  'Nuevo':            { siguiente:'Pago confirmado', boton:'Confirmar pago',  clase:'nuevo' },
+  'Pago confirmado':  { siguiente:'Empacado',        boton:'Marcar empacado', clase:'pago' },
+  'Empacado':         { siguiente:'Enviado',         boton:'Marcar enviado',  clase:'empacado' },
+  'Enviado':          { siguiente:'Entregado',       boton:'Marcar entregado',clase:'enviado' },
+  'Entregado':        { siguiente:null,              boton:null,              clase:'entregado' },
+  'Cancelado':        { siguiente:null,              boton:null,              clase:'err' }
+};
+
+let PEDIDOS = [], DET_VENTA = [], COMPRAS = [], DET_COMPRA = [];
+
+function getToken(){ return localStorage.getItem('airtable_token') || ''; }
+
+function guardarToken(){
+  const t = document.getElementById('token').value.trim();
+  if(!t.startsWith('pat')){ aviso('El token debe empezar con "pat".','err'); return; }
+  localStorage.setItem('airtable_token', t);
+  document.getElementById('token').value = '';
+  actualizarBadge();
+  cargarTodo();
+}
+
+function actualizarBadge(){
+  const b = document.getElementById('badge');
+  const cfg = document.getElementById('config');
+  if(getToken()){
+    b.innerHTML = '<span class="pill enviado">Conectado</span>';
+    cfg.style.display = 'none';
+  } else {
+    b.textContent = '';
+    cfg.style.display = 'block';
+  }
+}
+
+function aviso(txt, tipo){
+  const m = document.getElementById('msg');
+  m.textContent = txt;
+  m.className = 'msg ' + tipo;
+  window.scrollTo(0,0);
+}
+
+const money = n => '$' + Math.round(n||0).toLocaleString('es-CO');
+
+function diasDesde(fecha){
+  if(!fecha) return 0;
+  return Math.floor((new Date() - new Date(fecha)) / 86400000);
+}
+
+async function airtable(metodo, tabla, cuerpo, query){
+  const r = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tabla}${query||''}`, {
+    method: metodo,
+    headers: { 'Authorization':'Bearer '+getToken(), 'Content-Type':'application/json' },
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined
+  });
+  if(!r.ok){
+    const e = await r.json().catch(()=>({}));
+    throw new Error(e.error?.message || ('Error '+r.status));
+  }
+  return r.json();
+}
+
+async function traerTodo(tabla, campos){
+  let registros = [], offset = '';
+  do {
+    const q = '?pageSize=100' + campos.map(c=>'&fields%5B%5D='+encodeURIComponent(c)).join('') +
+      (offset ? '&offset='+offset : '');
+    const data = await airtable('GET', tabla, null, q);
+    registros = registros.concat(data.records);
+    offset = data.offset || '';
+  } while(offset);
+  return registros;
+}
+
+async function cargarTodo(){
+  if(!getToken()){ aviso('Conecta tu token para empezar.','err'); return; }
+  aviso('Cargando...','info');
+  try{
+    const [p, dv, c, dc] = await Promise.all([
+      traerTodo(T_PEDIDOS, ['Numero de pedido','Cliente','Contacto','Canal','Estado','Fecha',
+        'Costo de envio','Guia de envio','Total pedido','Notas']),
+      traerTodo(T_DETALLE_VENTA, ['Linea','Cantidad','Pedido']),
+      traerTodo(T_COMPRAS, ['Numero de compra','Proveedor','Estado','Fecha del pedido']),
+      traerTodo(T_DETALLE_COMPRA, ['Linea','Cantidad','Costo unitario','Recibido','Compra'])
+    ]);
+    PEDIDOS = p.map(r=>({id:r.id, ...r.fields}));
+    DET_VENTA = dv.map(r=>({id:r.id, ...r.fields}));
+    COMPRAS = c.map(r=>({id:r.id, ...r.fields}));
+    DET_COMPRA = dc.map(r=>({id:r.id, ...r.fields}));
+    render();
+    document.getElementById('msg').className = 'msg';
+  } catch(e){
+    aviso('No se pudo cargar: '+e.message,'err');
+  }
+}
+
+function render(){
+  renderResumen();
+  renderPedidos();
+  renderRecepcion();
+  renderEntregados();
+}
+
+function renderResumen(){
+  const cuenta = e => PEDIDOS.filter(p=>p['Estado']===e).length;
+  const porRecibir = DET_COMPRA.filter(d=>!d['Recibido']).length;
+
+  const atrasados = PEDIDOS.filter(p =>
+    ['Nuevo','Pago confirmado','Empacado'].includes(p['Estado']) && diasDesde(p['Fecha']) > 2
+  ).length;
+
+  document.getElementById('resumen').innerHTML = `
+    <div class="rcard ${cuenta('Nuevo')?'atencion':''}" onclick="irA('lista-pedidos')">
+      <b>${cuenta('Nuevo')}</b><small>Sin pago confirmado</small></div>
+    <div class="rcard" onclick="irA('lista-pedidos')">
+      <b>${cuenta('Pago confirmado')}</b><small>Por empacar</small></div>
+    <div class="rcard" onclick="irA('lista-pedidos')">
+      <b>${cuenta('Empacado')}</b><small>Por enviar</small></div>
+    <div class="rcard" onclick="irA('lista-pedidos')">
+      <b>${cuenta('Enviado')}</b><small>En camino</small></div>
+    <div class="rcard ${porRecibir?'atencion':''}" onclick="irA('lista-recepcion')">
+      <b>${porRecibir}</b><small>Líneas por recibir</small></div>
+    <div class="rcard ${atrasados?'urgente':''}" onclick="irA('lista-pedidos')">
+      <b>${atrasados}</b><small>Llevan +2 días</small></div>
+  `;
+}
+
+function irA(id){
+  document.getElementById(id).scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function productosDe(pedidoId){
+  return DET_VENTA
+    .filter(d => (d['Pedido']||[]).includes(pedidoId))
+    .map(d => `${d['Cantidad']}x ${(d['Linea']||'').replace(/^\S+-L\d+\s*/,'')}`)
+    .join(' · ');
+}
+
+function renderPedidos(){
+  const activos = PEDIDOS.filter(p => FLUJO[p['Estado']]?.siguiente);
+  const cont = document.getElementById('lista-pedidos');
+
+  if(!activos.length){
+    cont.innerHTML = '<div class="vacio"><b>Todo al día</b>No hay pedidos pendientes de atender.</div>';
+    return;
+  }
+
+  activos.sort((a,b) => (a['Fecha']||'').localeCompare(b['Fecha']||''));
+
+  cont.innerHTML = activos.map(p => {
+    const estado = p['Estado'];
+    const flujo = FLUJO[estado];
+    const dias = diasDesde(p['Fecha']);
+    const urgente = dias > 2;
+    const prods = productosDe(p.id);
+    const contacto = (p['Contacto']||'').trim();
+
+    const soloDigitos = contacto.replace(/\D/g,'');
+    const esCelular = soloDigitos.length >= 10;
+    const btnWhats = esCelular
+      ? `<button class="alt mini" onclick="avisarWhatsApp('${p.id}')">Avisar por WhatsApp</button>`
+      : '';
+
+    const campoGuia = estado === 'Empacado'
+      ? `<input class="guia-input" id="guia-${p.id}" placeholder="Guía de envío (opcional)" value="${p['Guia de envio']||''}">`
+      : '';
+
+    return `<div class="item ${urgente?'destacado':''}">
+      <div class="item-top">
+        <div class="item-tit">
+          <b>${p['Numero de pedido']||'—'}</b>
+          <small>${p['Cliente']||'—'} · ${p['Canal']||''} ·
+            ${dias === 0 ? 'hoy' : dias === 1 ? 'ayer' : `hace ${dias} días`}</small>
+        </div>
+        <div class="item-monto">
+          <b>${money(p['Total pedido'])}</b>
+          <small><span class="pill ${flujo.clase}">${estado}</span></small>
+        </div>
+      </div>
+      ${prods ? `<div class="item-prods">${prods}</div>` : ''}
+      <div class="item-acciones">
+        ${campoGuia}
+        <button class="verde mini" onclick="avanzar('${p.id}','${flujo.siguiente}')">${flujo.boton}</button>
+        ${btnWhats}
+        <button class="alt mini" onclick="cancelar('${p.id}')">Cancelar</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function avanzar(id, nuevoEstado){
+  const campos = { 'Estado': nuevoEstado };
+
+  const inputGuia = document.getElementById('guia-'+id);
+  if(inputGuia && inputGuia.value.trim()){
+    campos['Guia de envio'] = inputGuia.value.trim();
+  }
+
+  try{
+    await airtable('PATCH', T_PEDIDOS, { records:[{ id, fields: campos }] });
+    const p = PEDIDOS.find(x=>x.id===id);
+    if(p){ Object.assign(p, campos); }
+    render();
+    aviso(`Pedido actualizado a "${nuevoEstado}".`,'ok');
+  } catch(e){
+    aviso('No se pudo actualizar: '+e.message,'err');
+  }
+}
+
+async function cancelar(id){
+  const p = PEDIDOS.find(x=>x.id===id);
+  if(!confirm(`¿Cancelar el pedido ${p?.['Numero de pedido']||''}?`)) return;
+  try{
+    await airtable('PATCH', T_PEDIDOS, { records:[{ id, fields:{ 'Estado':'Cancelado' } }] });
+    if(p) p['Estado'] = 'Cancelado';
+    render();
+    aviso('Pedido cancelado.','ok');
+  } catch(e){
+    aviso('No se pudo cancelar: '+e.message,'err');
+  }
+}
+
+function avisarWhatsApp(id){
+  const p = PEDIDOS.find(x=>x.id===id);
+  if(!p) return;
+  let tel = (p['Contacto']||'').replace(/\D/g,'');
+  if(tel.length === 10) tel = '57' + tel;
+
+  const nombre = (p['Cliente']||'').split(' ')[0];
+  const prods = productosDe(p.id);
+  const guia = p['Guia de envio'];
+
+  const mensajes = {
+    'Nuevo': `Hola ${nombre}! Te confirmo tu pedido: ${prods}. Total ${money(p['Total pedido'])}${p['Costo de envio'] ? ' + ' + money(p['Costo de envio']) + ' de envío' : ''}. Quedo pendiente del pago para despacharlo.`,
+    'Pago confirmado': `Hola ${nombre}! Ya recibimos tu pago. Estamos empacando tu pedido y te aviso apenas salga.`,
+    'Empacado': `Hola ${nombre}! Tu pedido ya está empacado y sale hoy.`,
+    'Enviado': `Hola ${nombre}! Tu pedido ya va en camino${guia ? '. Guía: ' + guia : ''}. Cualquier cosa me avisas.`
+  };
+
+  const texto = mensajes[p['Estado']] || `Hola ${nombre}! Te escribo por tu pedido ${p['Numero de pedido']}.`;
+  window.open(`https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, '_blank');
+}
+
+function renderRecepcion(){
+  const pendientes = DET_COMPRA.filter(d => !d['Recibido']);
+  const cont = document.getElementById('lista-recepcion');
+
+  if(!pendientes.length){
+    cont.innerHTML = '<div class="vacio"><b>Nada pendiente</b>Toda la mercancía pedida ya fue recibida.</div>';
+    return;
+  }
+
+  const porCompra = {};
+  pendientes.forEach(d => {
+    const compraId = (d['Compra']||[])[0] || 'sin-compra';
+    (porCompra[compraId] ||= []).push(d);
+  });
+
+  cont.innerHTML =
+    `<div class="lote">
+      <button class="alt mini" onclick="marcarTodas(true)">Seleccionar todo</button>
+      <button class="alt mini" onclick="marcarTodas(false)">Quitar selección</button>
+      <button class="verde mini" id="btn-recibir" onclick="confirmarRecepcion()">Confirmar recepción</button>
+    </div>` +
+    Object.entries(porCompra).map(([compraId, lineas]) => {
+      const compra = COMPRAS.find(c=>c.id===compraId);
+      const total = lineas.reduce((s,l)=> s + (l['Cantidad']||0)*(l['Costo unitario']||0), 0);
+      return `<div class="grupo-compra">
+        <h3>${compra?.['Numero de compra'] || 'Sin compra asociada'}</h3>
+        <div class="meta">${compra?.['Proveedor']||''} · pedido ${compra?.['Fecha del pedido']||'—'} ·
+          ${lineas.length} líneas pendientes · ${money(total)}</div>
+        ${lineas.map(l => `
+          <label class="linea-recep">
+            <input type="checkbox" class="chk-recep" value="${l.id}">
+            <span class="desc">${(l['Linea']||'').replace(/^\S+-L\d+\s*/,'')}
+              <small>${money(l['Costo unitario'])} c/u</small></span>
+            <span class="cant">${l['Cantidad']} und</span>
+          </label>`).join('')}
+      </div>`;
+    }).join('');
+}
+
+function marcarTodas(valor){
+  document.querySelectorAll('.chk-recep').forEach(c => c.checked = valor);
+}
+
+async function confirmarRecepcion(){
+  const ids = [...document.querySelectorAll('.chk-recep:checked')].map(c=>c.value);
+  if(!ids.length){ aviso('Selecciona al menos una línea que haya llegado.','err'); return; }
+  if(!confirm(`¿Confirmar recepción de ${ids.length} línea${ids.length>1?'s':''}? El stock subirá automáticamente.`)) return;
+
+  const btn = document.getElementById('btn-recibir');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  try{
+    for(let i=0; i<ids.length; i+=10){
+      await airtable('PATCH', T_DETALLE_COMPRA, {
+        records: ids.slice(i,i+10).map(id => ({ id, fields:{ 'Recibido': true } }))
+      });
+    }
+
+    const compras = new Set();
+    ids.forEach(id => {
+      const l = DET_COMPRA.find(d=>d.id===id);
+      if(l){ l['Recibido'] = true; (l['Compra']||[]).forEach(c=>compras.add(c)); }
+    });
+    for(const compraId of compras){
+      const faltan = DET_COMPRA.some(d => (d['Compra']||[]).includes(compraId) && !d['Recibido']);
+      if(!faltan){
+        await airtable('PATCH', T_COMPRAS, { records:[{ id:compraId, fields:{
+          'Estado':'Recibido',
+          'Fecha de recepcion': new Date().toISOString().slice(0,10)
+        }}]});
+        const c = COMPRAS.find(x=>x.id===compraId);
+        if(c) c['Estado'] = 'Recibido';
+      }
+    }
+
+    render();
+    aviso(`${ids.length} línea${ids.length>1?'s':''} recibida${ids.length>1?'s':''}. El stock ya está actualizado.`,'ok');
+  } catch(e){
+    aviso('No se pudo confirmar: '+e.message,'err');
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Confirmar recepción';
+}
+
+function renderEntregados(){
+  const lista = PEDIDOS.filter(p => p['Estado']==='Entregado')
+    .sort((a,b)=>(b['Fecha']||'').localeCompare(a['Fecha']||''))
+    .slice(0,10);
+  const cont = document.getElementById('lista-entregados');
+
+  if(!lista.length){ cont.innerHTML = '<div class="vacio">Todavía no hay pedidos entregados.</div>'; return; }
+
+  cont.innerHTML = lista.map(p => `<div class="item">
+    <div class="item-top">
+      <div class="item-tit">
+        <b>${p['Numero de pedido']||'—'}</b>
+        <small>${p['Cliente']||'—'} · ${p['Fecha']||''}${p['Guia de envio'] ? ' · guía '+p['Guia de envio'] : ''}</small>
+      </div>
+      <div class="item-monto"><b>${money(p['Total pedido'])}</b></div>
+    </div>
+  </div>`).join('');
+}
+
+actualizarBadge();
+if(getToken()) cargarTodo();
+</script>
+</body>
+</html>
