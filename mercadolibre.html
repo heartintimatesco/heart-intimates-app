@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heart Intimates — Mercado Libre</title>
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body class="app-producto">
+<div class="wrap ancho">
+
+<h1>Mercado Libre</h1>
+<p class="sub">Heart Intimates · publicar variantes pendientes desde Airtable</p>
+<div class="nav">
+  <a href="index.html">Pedido cliente</a>
+  <a href="pedido-proveedor.html">Pedido proveedor</a>
+  <a href="operacion.html">Operación</a>
+  <a href="dashboard.html">Panel de control</a>
+  <a href="nuevo-producto.html">Nuevo producto</a>
+  <a href="mercadolibre.html" class="activo">Mercado Libre</a>
+</div>
+
+<div id="msg" class="msg"></div>
+
+<!-- Conexion con Airtable: mismo token que las otras apps -->
+<div id="config-at" class="config">
+  <b>Conectar con Airtable</b> <span id="badge-at"></span>
+  <p style="margin:6px 0 0;color:var(--mut)">Usa el mismo token de las otras apps.</p>
+  <div class="config-row">
+    <input id="token-at" type="password" placeholder="pat...">
+    <button onclick="guardarTokenAirtable()">Guardar</button>
+  </div>
+</div>
+
+<!-- Conexion con Mercado Libre: se guarda el refresh token para renovar solo -->
+<div id="config-ml" class="config">
+  <b>Conectar con Mercado Libre</b> <span id="badge-ml"></span>
+  <p style="margin:6px 0 0;color:var(--mut)">
+    Pega aqui los datos que te dio la app de developers.mercadolibre.com.co
+    (Client ID, Client Secret) y el access_token / refresh_token generados en la autorizacion.
+    Con el refresh token, esta app renueva el acceso sola cada 6 horas sin que tengas que
+    volver a autorizar.
+  </p>
+  <div class="config-row"><input id="ml-client-id" placeholder="Client ID (App ID)"></div>
+  <div class="config-row"><input id="ml-client-secret" type="password" placeholder="Client Secret"></div>
+  <div class="config-row"><input id="ml-access-token" type="password" placeholder="access_token (APP_USR-...)"></div>
+  <div class="config-row"><input id="ml-refresh-token" type="password" placeholder="refresh_token (TG-...)"></div>
+  <div class="config-row"><button onclick="guardarConfigMl()">Guardar</button></div>
+</div>
+
+<!-- Paso 1: cargar variantes pendientes de publicar -->
+<div class="card">
+  <div class="paso"><b>1</b><h2 style="margin:0">Variantes pendientes</h2></div>
+  <p class="h2nota">
+    Se listan las variantes con "Estado Mercado Libre" = Pendiente y stock disponible mayor a cero.
+    Las que no tienen stock no se muestran para evitar publicar algo que no se puede vender.
+  </p>
+  <button onclick="cargarPendientes()" id="btn-cargar">Buscar pendientes</button>
+  <div id="lista-pendientes" style="margin-top:14px"></div>
+</div>
+
+</div>
+
+<script>
+/*
+  MERCADO LIBRE — publicar variantes pendientes
+  ------------------------------------------------
+  Flujo por variante:
+   1. Se trae de Airtable: SKU, color, precio (del producto), stock disponible,
+      descripcion (del producto), foto (URL publica del adjunto de Airtable).
+   2. El usuario pulsa "Detectar categoria" -> se llama al predictor publico de ML
+      (no requiere token) para sugerir la categoria segun el titulo.
+   3. Se piden los atributos obligatorios de esa categoria (marca, genero, etc.)
+      con valores por defecto razonables, editables antes de publicar.
+   4. Al publicar: POST /items con el token de ML. Si ML responde con atributos
+      faltantes, se muestra el error tal cual para agregarlos y reintentar.
+   5. Si el POST fue exitoso, se guarda el item_id y se cambia el estado en
+      Airtable a "Publicado", y se hace un PUT de la descripcion aparte
+      (la API de ML separa titulo/precio de la descripcion en dos llamadas).
+
+  Los tokens de Airtable, y de ML (client id/secret + tokens), se guardan en
+  localStorage de este navegador. Nunca se suben al repositorio.
+*/
+
+const BASE_ID = "appBVPFSRXvHnoS96";
+const T_VARIANTES = "tblmmlhQOKmrLh44m";
+const T_PRODUCTOS = "tblbbsof4KGbNDdbN";
+
+// Campos de Variantes que usamos
+const F_VAR_SKU        = "fldwTEuGQDl7BZGYX";
+const F_VAR_COLOR      = "fld6R4tsM4IBuVPPv";
+const F_VAR_ESTADO_ML  = "fldOCeIQh6YkyCNSk";
+const F_VAR_ID_ML      = "fldjqiEm41Qy5UIz4";
+const F_VAR_PRODUCTO   = "fldiYGyNKAqppU6RB";
+const F_VAR_IMAGEN     = "fldEPjcn6tfT3IGVW";
+const F_VAR_STOCK_DISP = "fld9g3nm2Xg7i3fsw"; // formula "Stock disponible"
+
+// Campos de Productos que usamos
+const F_PROD_NOMBRE  = "fldeKmjSkoZatkRXr";
+const F_PROD_TIPO    = "fldD3rVmwS7K8C3YD";
+const F_PROD_DETAL   = "fldmhQ365k6wcvytz";
+const F_PROD_DESC    = "fldxwnvcdGzIYVmaP";
+
+const SITE_ID = "MCO"; // Colombia
+
+// ---------- Airtable: token y llamadas ----------
+function getTokenAirtable(){ return localStorage.getItem('airtable_token') || ''; }
+
+function guardarTokenAirtable(){
+  const t = document.getElementById('token-at').value.trim();
+  if(!t.startsWith('pat')){ aviso('El token de Airtable debe empezar con "pat".','err'); return; }
+  localStorage.setItem('airtable_token', t);
+  document.getElementById('token-at').value = '';
+  actualizarBadges();
+}
+
+async function airtable(metodo, tabla, cuerpo, query){
+  const base = `https://api.airtable.com/v0/${BASE_ID}/${tabla}`;
+  const r = await fetch(base + (query||''), {
+    method: metodo,
+    headers: { 'Authorization':'Bearer '+getTokenAirtable(), 'Content-Type':'application/json' },
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined
+  });
+  if(!r.ok){
+    const e = await r.json().catch(()=>({}));
+    throw new Error(e.error?.message || ('Error '+r.status));
+  }
+  return r.json();
+}
+
+// ---------- Mercado Libre: tokens y renovacion automatica ----------
+function guardarConfigMl(){
+  const clientId = document.getElementById('ml-client-id').value.trim();
+  const clientSecret = document.getElementById('ml-client-secret').value.trim();
+  const accessToken = document.getElementById('ml-access-token').value.trim();
+  const refreshToken = document.getElementById('ml-refresh-token').value.trim();
+  if(!clientId || !clientSecret || !accessToken || !refreshToken){
+    aviso('Completa los 4 campos de Mercado Libre.','err'); return;
+  }
+  localStorage.setItem('ml_client_id', clientId);
+  localStorage.setItem('ml_client_secret', clientSecret);
+  localStorage.setItem('ml_access_token', accessToken);
+  localStorage.setItem('ml_refresh_token', refreshToken);
+  // Como no sabemos hace cuanto se genero, forzamos una renovacion en la
+  // primera llamada real (ver mlAccessToken).
+  localStorage.setItem('ml_expira_en', '0');
+  ['ml-client-id','ml-client-secret','ml-access-token','ml-refresh-token'].forEach(id=>{
+    document.getElementById(id).value = '';
+  });
+  actualizarBadges();
+  aviso('Conectado con Mercado Libre.','ok');
+}
+
+// Devuelve un access_token valido, renovandolo primero si esta por vencer.
+async function mlAccessToken(){
+  const expira = Number(localStorage.getItem('ml_expira_en') || 0);
+  const margenSeguridad = 5 * 60 * 1000; // 5 minutos de colchon
+  if(Date.now() < expira - margenSeguridad){
+    return localStorage.getItem('ml_access_token');
+  }
+  // Renovar usando el refresh_token
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: localStorage.getItem('ml_client_id'),
+    client_secret: localStorage.getItem('ml_client_secret'),
+    refresh_token: localStorage.getItem('ml_refresh_token')
+  });
+  const r = await fetch('https://api.mercadolibre.com/oauth/token', {
+    method: 'POST',
+    headers: { 'accept':'application/json', 'content-type':'application/x-www-form-urlencoded' },
+    body
+  });
+  if(!r.ok){
+    throw new Error('No se pudo renovar el token de Mercado Libre. Revisa la conexion arriba.');
+  }
+  const data = await r.json();
+  localStorage.setItem('ml_access_token', data.access_token);
+  localStorage.setItem('ml_refresh_token', data.refresh_token); // ML rota el refresh token tambien
+  localStorage.setItem('ml_expira_en', String(Date.now() + data.expires_in * 1000));
+  return data.access_token;
+}
+
+async function mlFetch(path, opciones){
+  const token = await mlAccessToken();
+  const headers = Object.assign({ 'Authorization': 'Bearer '+token }, (opciones && opciones.headers) || {});
+  const r = await fetch('https://api.mercadolibre.com'+path, Object.assign({}, opciones, { headers }));
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){
+    // ML devuelve un array "cause" con el detalle de cada atributo/campo con problema
+    const detalle = (data.cause||[]).map(c=>c.message||c.code).join(' | ');
+    throw new Error((data.message||'Error '+r.status) + (detalle ? (' — '+detalle) : ''));
+  }
+  return data;
+}
+
+function actualizarBadges(){
+  const bat = document.getElementById('badge-at');
+  const cat = document.getElementById('config-at');
+  if(getTokenAirtable()){
+    bat.innerHTML = '<span style="color:var(--ok);font-size:12px;font-weight:600">Conectado</span>';
+    cat.style.display = 'none';
+  } else { bat.textContent=''; cat.style.display='block'; }
+
+  const bml = document.getElementById('badge-ml');
+  const cml = document.getElementById('config-ml');
+  if(localStorage.getItem('ml_access_token')){
+    bml.innerHTML = '<span style="color:var(--ok);font-size:12px;font-weight:600">Conectado</span>';
+    cml.style.display = 'none';
+  } else { bml.textContent=''; cml.style.display='block'; }
+}
+
+function aviso(txt, tipo){
+  const m = document.getElementById('msg');
+  m.textContent = txt;
+  m.className = 'msg ' + tipo;
+  window.scrollTo(0,0);
+}
+
+// ---------- Paso 1: cargar variantes pendientes ----------
+async function cargarPendientes(){
+  if(!getTokenAirtable()){ aviso('Conecta Airtable arriba.','err'); return; }
+  const boton = document.getElementById('btn-cargar');
+  boton.disabled = true; boton.textContent = 'Buscando...';
+  try{
+    // Traemos todas las variantes y filtramos en el navegador: es una tabla
+    // chica y asi evitamos pelear con el formato de filtro de Airtable para
+    // el select "Pendiente" y la formula de stock.
+    const data = await airtable('GET', T_VARIANTES, null, '?pageSize=100&returnFieldsByFieldId=true');
+    const pendientes = data.records.filter(r=>{
+      const estado = r.fields[F_VAR_ESTADO_ML];
+      const stock = r.fields[F_VAR_STOCK_DISP] || 0;
+      const nombreEstado = estado ? (estado.name||estado) : 'Pendiente';
+      return nombreEstado === 'Pendiente' && stock > 0;
+    });
+
+    if(pendientes.length === 0){
+      document.getElementById('lista-pendientes').innerHTML =
+        '<p style="color:var(--mut)">No hay variantes pendientes con stock disponible.</p>';
+      return;
+    }
+
+    // Necesitamos el nombre/tipo/precio/descripcion del producto de cada una
+    const idsProductos = [...new Set(pendientes.map(r=>r.fields[F_VAR_PRODUCTO]?.[0]).filter(Boolean))];
+    const productos = {};
+    for(const id of idsProductos){
+      const p = await airtable('GET', T_PRODUCTOS, null, `/${id}?returnFieldsByFieldId=true`);
+      productos[id] = p.fields;
+    }
+
+    renderPendientes(pendientes, productos);
+  } catch(e){
+    aviso('Error al cargar: '+e.message, 'err');
+  } finally {
+    boton.disabled = false; boton.textContent = 'Buscar pendientes';
+  }
+}
+
+function renderPendientes(variantes, productos){
+  const cont = document.getElementById('lista-pendientes');
+  cont.innerHTML = '';
+  variantes.forEach(v=>{
+    const prodId = v.fields[F_VAR_PRODUCTO]?.[0];
+    const prod = productos[prodId] || {};
+    const titulo = `${prod[F_PROD_NOMBRE]||''} ${v.fields[F_VAR_COLOR]||''}`.trim();
+    const foto = v.fields[F_VAR_IMAGEN]?.[0]?.url || '';
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.id = 'fila-'+v.id;
+    div.innerHTML = `
+      <b>${titulo}</b> <span class="pill neutro">${v.fields[F_VAR_SKU]||''}</span>
+      <div style="display:flex;gap:12px;margin-top:8px;align-items:flex-start">
+        ${foto ? `<img src="${foto}" style="width:70px;height:70px;object-fit:cover;border-radius:8px">` : ''}
+        <div style="flex:1">
+          <label>Precio de venta</label>
+          <input id="precio-${v.id}" type="number" value="${prod[F_PROD_DETAL]||0}">
+          <label>Stock a publicar</label>
+          <input id="stock-${v.id}" type="number" value="${v.fields[F_VAR_STOCK_DISP]||0}">
+          <div class="botonera" style="margin-top:8px">
+            <button class="alt mini" onclick="detectarCategoria('${v.id}', '${escape(titulo)}')">1. Detectar categoría</button>
+            <button class="mini" id="btn-pub-${v.id}" onclick="publicar('${v.id}')" disabled>2. Publicar</button>
+          </div>
+          <div id="categoria-${v.id}" style="margin-top:8px;font-size:13px;color:var(--mut)"></div>
+          <div id="atributos-${v.id}" style="margin-top:8px"></div>
+          <div id="resultado-${v.id}" style="margin-top:8px"></div>
+        </div>
+      </div>
+    `;
+    cont.appendChild(div);
+    // Guardamos datos que necesitamos despues, sin re-consultar Airtable
+    div.dataset.sku = v.fields[F_VAR_SKU]||'';
+    div.dataset.descripcion = prod[F_PROD_DESC] || titulo;
+    div.dataset.foto = foto;
+  });
+}
+
+// ---------- Paso 2: predictor de categoria (endpoint publico, sin token) ----------
+async function detectarCategoria(varianteId, tituloEscapado){
+  const titulo = unescape(tituloEscapado);
+  const cont = document.getElementById('categoria-'+varianteId);
+  cont.textContent = 'Buscando categoría...';
+  try{
+    const r = await fetch(`https://api.mercadolibre.com/sites/${SITE_ID}/domain_discovery/search?limit=3&q=${encodeURIComponent(titulo)}`);
+    const sugerencias = await r.json();
+    if(!sugerencias.length){ cont.textContent = 'No se encontraron sugerencias, hay que elegir manual.'; return; }
+    cont.innerHTML = 'Categoría: <select id="cat-select-'+varianteId+'">' +
+      sugerencias.map(s=>`<option value="${s.category_id}">${s.category_name}</option>`).join('') +
+      '</select>';
+    await cargarAtributos(varianteId, sugerencias[0].category_id);
+    document.getElementById('cat-select-'+varianteId).addEventListener('change', (e)=>{
+      cargarAtributos(varianteId, e.target.value);
+    });
+  } catch(e){
+    cont.textContent = 'Error detectando categoría: '+e.message;
+  }
+}
+
+// Trae los atributos obligatorios de la categoria y los muestra editables,
+// con valores por defecto razonables para no bloquear la primera publicacion.
+async function cargarAtributos(varianteId, categoriaId){
+  const cont = document.getElementById('atributos-'+varianteId);
+  cont.innerHTML = 'Cargando atributos obligatorios...';
+  try{
+    const r = await fetch(`https://api.mercadolibre.com/categories/${categoriaId}/attributes`);
+    const atributos = await r.json();
+    const obligatorios = atributos.filter(a => a.tags && a.tags.required);
+    if(obligatorios.length === 0){
+      cont.innerHTML = '<span style="color:var(--mut)">Esta categoría no pide atributos obligatorios.</span>';
+    } else {
+      cont.innerHTML = obligatorios.map(a=>{
+        const valorDefecto = valorPorDefecto(a);
+        return `<label>${a.name}${a.id==='BRAND'?' (marca)':''}</label>
+                <input id="attr-${varianteId}-${a.id}" value="${valorDefecto}">`;
+      }).join('');
+    }
+    document.getElementById('lista-pendientes').querySelector('#fila-'+varianteId).dataset.categoria = categoriaId;
+    document.getElementById('btn-pub-'+varianteId).disabled = false;
+  } catch(e){
+    cont.innerHTML = 'Error cargando atributos: '+e.message;
+  }
+}
+
+// Defaults pensados para ropa interior generica, sin marca propia registrada
+function valorPorDefecto(atributo){
+  const id = atributo.id;
+  if(id === 'BRAND') return 'Genérica';
+  if(id === 'GENDER') return 'Dama';
+  if(id === 'SIZE' || id === 'SIZE_GRID_ID') return 'Única';
+  if(atributo.values && atributo.values.length) return atributo.values[0].name;
+  return '';
+}
+
+// ---------- Paso 3: publicar ----------
+async function publicar(varianteId){
+  const fila = document.getElementById('fila-'+varianteId);
+  const resultado = document.getElementById('resultado-'+varianteId);
+  const boton = document.getElementById('btn-pub-'+varianteId);
+  boton.disabled = true; boton.textContent = 'Publicando...';
+  try{
+    const categoria = fila.dataset.categoria;
+    if(!categoria){ throw new Error('Primero detecta la categoría.'); }
+
+    // Reunimos los atributos obligatorios que el usuario dejo o edito
+    const inputsAtributos = fila.querySelectorAll('[id^="attr-'+varianteId+'-"]');
+    const attributes = Array.from(inputsAtributos).map(inp=>{
+      const attrId = inp.id.replace('attr-'+varianteId+'-', '');
+      return { id: attrId, value_name: inp.value };
+    });
+
+    const precio = Number(document.getElementById('precio-'+varianteId).value);
+    const stock = Number(document.getElementById('stock-'+varianteId).value);
+    const foto = fila.dataset.foto;
+
+    const payload = {
+      title: fila.querySelector('b').textContent.slice(0,60), // ML limita el titulo a 60 caracteres
+      category_id: categoria,
+      price: precio,
+      currency_id: 'COP',
+      available_quantity: stock,
+      buying_mode: 'buy_it_now',
+      condition: 'new',
+      listing_type_id: 'gold_special',
+      attributes,
+      pictures: foto ? [{ source: foto }] : []
+    };
+
+    const item = await mlFetch('/items', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) });
+
+    // La descripcion va aparte en la API de ML
+    await mlFetch(`/items/${item.id}/description`, {
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ plain_text: fila.dataset.descripcion })
+    });
+
+    // Guardamos el resultado en Airtable: id de la publicacion y estado
+    await airtable('PATCH', T_VARIANTES, {
+      records: [{ id: varianteId, fields: {
+        [F_VAR_ID_ML]: item.id,
+        [F_VAR_ESTADO_ML]: 'Publicado'
+      }}]
+    });
+
+    resultado.innerHTML = `<span style="color:var(--ok)">✔ Publicado: ${item.id} — <a href="${item.permalink}" target="_blank">ver en ML</a></span>`;
+    boton.textContent = 'Publicado';
+  } catch(e){
+    resultado.innerHTML = `<span style="color:var(--error)">✖ ${e.message}</span>`;
+    boton.disabled = false; boton.textContent = '2. Publicar';
+  }
+}
+
+actualizarBadges();
+</script>
+</body>
+</html>
