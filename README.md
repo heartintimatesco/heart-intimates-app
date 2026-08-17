@@ -1,63 +1,82 @@
-# Heart Intimates — Tomar pedido
+# Heart Intimates — sistema de operación
 
-App para registrar pedidos de clientas directo en Airtable, con foto de
-cada conjunto para confirmar el color correcto antes de guardar.
+Seis apps web que corren en GitHub Pages y hablan directo con Airtable.
+Funcionan en el celular o en el computador, sin instalar nada.
 
-## Uso
-Abre `index.html` en cualquier navegador (celular o computador).
-La primera vez, pega tu token personal de Airtable en el panel de conexión:
+## Empezar
 
-1. Crea uno en https://airtable.com/create/tokens
+Abre cualquiera de las apps y pega tu token personal de Airtable la primera vez:
+
+1. Créalo en https://airtable.com/create/tokens
 2. Dale permisos `data.records:read` y `data.records:write`
 3. Dale acceso solo a la base "Heart Intimates — Inventario"
-4. Pégalo en la app y presiona Guardar
 
-El token se guarda solo en ese dispositivo (localStorage del navegador).
-Nunca se sube a este repositorio ni se comparte con nadie más.
+El token queda guardado en ese dispositivo (localStorage del navegador) y lo
+comparten las seis apps. Nunca se sube a este repositorio.
 
-## Modelo de stock (desde v1.1)
-El stock se maneja en tres cantidades, todas calculadas por Airtable:
-- **Stock fisico**: recibido del proveedor menos lo que ya salio de bodega
-- **Total reservado**: comprometido en pedidos en estado Nuevo o Pago confirmado
-- **Stock disponible**: fisico menos reservado. Es el numero que se muestra al
-  tomar un pedido, para no vender algo que ya esta comprometido.
+## Las apps
 
-Los pedidos **cancelados no descuentan stock** (en v1.0 si lo hacian, era un error).
-Cuando una clienta pide algo que no hay, la diferencia queda en **Encargado por
-clientas** y aparece precargada en la app de pedido al proveedor.
+| Archivo | Para qué |
+|---|---|
+| `index.html` | Tomar pedidos de clientas (precio detal) |
+| `pedido-proveedor.html` | Compra mensual al proveedor (precio por mayor) |
+| `operacion.html` | Trabajo diario: estados de pedidos, avisos por WhatsApp, recepción de mercancía |
+| `dashboard.html` | Panel de solo lectura: inventario, historial y rentabilidad |
+| `nuevo-producto.html` | Dar de alta sets y colores nuevos |
+| `mercadolibre.html` | Publicar en Mercado Libre lo que está pendiente |
 
-## Estructura
-- `inicio.html` — pantalla para elegir entre las dos apps.
-- `index.html` — tomar pedidos de clientas (precio detal).
-- `pedido-proveedor.html` — compra mensual al proveedor (precio por mayor),
-  con lectura de stock en vivo desde Airtable y control de presupuesto.
-- `operacion.html` — trabajo diario: cambiar estado de pedidos (nuevo,
-  pago confirmado, empacado, enviado, entregado), avisar a clientas por
-  WhatsApp con mensaje ya redactado, y marcar recepción de mercancía del
-  proveedor (sube el stock automáticamente al confirmar).
-- `dashboard.html` — panel de control de solo lectura: inventario actual,
-  historial de pedidos y compras, y rentabilidad por variante.
-- `estilo.css` — hoja de estilos compartida por las cinco apps. Editarla aqui
-  cambia el diseño de todo el sistema a la vez.
-- `nuevo-producto.html` — agregar sets y colores nuevos al catalogo: crea el
-  producto y sus variantes en Airtable (con foto incluida), y genera el
-  fragmento de codigo listo para pegar en index.html y pedido-proveedor.html.
+Más dos archivos compartidos:
 
-Las dos apps incluyen las fotos de los 44 productos incrustadas como
-miniaturas, para funcionar sin depender de carpetas locales.
-- `scripts_generar_fotos.py` — script usado para generar y emparejar las
-  miniaturas la última vez que se actualizó el catálogo.
+- `app.js` — conexión con Airtable, catálogo y utilidades. Lo cargan las seis apps.
+- `estilo.css` — hoja de estilos común. Editarla cambia el diseño de todo el sistema.
+
+## Cómo está armado (v2.0)
+
+**Airtable es la única fuente de verdad.** El nombre, el precio, el color, la
+foto y el stock de cada variante salen de ahí y se leen al abrir cada app.
+
+Antes el catálogo estaba escrito a mano en un arreglo `CAT` dentro de
+`index.html` y `pedido-proveedor.html`, con las fotos incrustadas en base64.
+Eso pesaba varios megas por archivo y obligaba a editar dos archivos y hacer un
+commit cada vez que entraba un color nuevo. Ya no existe.
+
+**Las fotos viven en Airtable.** Sus URLs expiran a las pocas horas, así que no
+se pueden guardar ni cachear: se piden frescas en cada carga. Airtable genera
+las miniaturas, y la app solo baja la foto grande cuando se toca para ampliarla.
+Los originales en alta resolución siguen en Google Drive, organizados en una
+carpeta por variante, para producir contenido.
+
+## Modelo de stock
+
+Tres cantidades, todas calculadas por Airtable:
+
+- **Stock físico** — recibido del proveedor menos lo que ya salió de bodega
+- **Total reservado** — comprometido en pedidos Nuevo o Pago confirmado
+- **Stock disponible** — físico menos reservado. Es el número que se muestra al
+  tomar un pedido, para no vender algo ya comprometido.
+
+Los pedidos cancelados no descuentan stock. Cuando una clienta pide algo que no
+hay, la diferencia queda en **Encargado por clientas** y aparece precargada en
+la app de pedido al proveedor.
 
 ## Mantenimiento mensual
+
 Cuando llega el catálogo nuevo del proveedor:
-1. Actualizar disponibilidad en Airtable (tabla Productos, "Disponible ahora")
-2. Si hay productos o colores nuevos, agregarlos al arreglo `CAT` en
-   AMBOS archivos: `index.html` (con `p:` precio detal) y
-   `pedido-proveedor.html` (con `p:` y `c:` costo por mayor)
-3. Confirmar y subir una nueva versión (ver historial de cambios abajo)
+
+1. Actualizar la disponibilidad en Airtable (tabla Productos, "Disponible ahora")
+2. Si hay productos o colores nuevos, darlos de alta en `nuevo-producto.html`
+
+Eso es todo. **Ya no hay que tocar código ni subir nada a este repositorio**
+para cambiar el catálogo.
 
 ## Seguridad
-Este repositorio NUNCA debe contener:
-- Tokens de Airtable
-- Datos reales de clientas (nombres, contactos, pedidos)
-Solo contiene el catálogo de productos (fotos, precios) y el código de la app.
+
+Este repositorio nunca debe contener:
+
+- Tokens de Airtable ni credenciales de Mercado Libre
+- Datos de clientas (nombres, contactos, pedidos)
+
+Todas las credenciales se guardan solo en el navegador de cada dispositivo.
+Ojo con `mercadolibre.html`: guarda el `client_secret` y el refresh token de
+Mercado Libre, que dan control sobre la cuenta. No abrir esa app en un
+computador compartido.

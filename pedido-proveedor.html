@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heart Intimates — Pedido al proveedor</title>
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body class="app-proveedor con-barra">
+<div class="wrap">
+
+<h1>Pedido al proveedor</h1>
+<p class="sub">Heart Intimates · compra mensual</p>
+<div class="nav">
+  <a href="index.html">Pedido cliente</a>
+  <a href="pedido-proveedor.html" class="activo">Pedido proveedor</a>
+  <a href="operacion.html">Operación</a>
+  <a href="dashboard.html">Panel de control</a>
+  <a href="nuevo-producto.html">Nuevo producto</a>
+  <a href="mercadolibre.html">Mercado Libre</a>
+</div>
+
+<div id="msg" class="msg"></div>
+
+<!-- Conexion con Airtable: se guarda una sola vez en este dispositivo -->
+<div id="config" class="config">
+  <b>Conectar con Airtable</b> <span id="badge-conexion"></span>
+  <p style="margin:6px 0 0;color:var(--mut)">
+    Crea un token en
+    <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a>
+    con permisos <b>data.records:read</b> y <b>data.records:write</b>,
+    dando acceso solo a la base Heart Intimates.
+  </p>
+  <div class="config-row">
+    <input id="token" type="password" placeholder="pat...">
+    <button onclick="guardarToken()">Guardar</button>
+  </div>
+</div>
+
+<!-- Datos de la compra -->
+<div class="card">
+  <h2>Datos de la compra</h2>
+  <label>Proveedor</label>
+  <input id="proveedor" value="Kiere Lencería">
+  <label>Presupuesto de esta compra (para no pasarte)</label>
+  <input id="presupuesto" type="number" placeholder="1000000">
+  <label>Notas (opcional)</label>
+  <input id="notas" placeholder="Priorizar lo que se está agotando">
+  <label>Tu correo (para enviarte el resumen y reenviarlo al proveedor)</label>
+  <input id="correo-resumen" type="email" placeholder="heartintimates@gmail.com">
+</div>
+
+<!-- Catalogo con stock actual, agrupado por producto -->
+<div class="card">
+  <h2>Qué pedir</h2>
+  <p class="leyenda">
+    El stock viene de Airtable. Lo marcado en rojo ya está en nivel de reposición.
+  </p>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <button class="alt" onclick="iniciar()">Actualizar stock</button>
+    <button class="alt" id="btn-reposicion" onclick="soloReposicion()">Ver solo lo que falta</button>
+    <button class="alt" id="btn-encargos" onclick="cargarEncargos()">Cargar encargos</button>
+  </div>
+  <div id="sets"></div>
+</div>
+
+</div>
+
+<!-- Barra fija con el total de la compra -->
+<div class="barra">
+  <div class="barra-inner">
+    <div class="barra-tot">
+      <small id="resumen-cant">0 unidades</small>
+      <b id="total">$0</b>
+    </div>
+    <button id="guardar" onclick="guardar()">Registrar compra</button>
+  </div>
+</div>
+
+<div id="lupa" class="lupa" onclick="this.style.display='none'">
+  <img src="" alt="Foto del conjunto">
+</div>
+
+<script src="app.js"></script>
+<script>
+/*
+  COMPRA MENSUAL AL PROVEEDOR
+  El catalogo, el costo por mayor y el stock salen de Airtable (ver app.js).
+  Esta pantalla agrega: costo editable por linea, control de presupuesto,
+  filtro de reposicion y precarga de lo que las clientas ya encargaron.
+*/
+
+let filtroReposicion = false;
+let precargarEncargos = false;
+
+async function iniciar(){
+  if(!getToken()){
+    document.getElementById('sets').innerHTML =
+      '<p class="vacio">Conecta tu token de Airtable arriba para ver el catálogo.</p>';
+    return;
+  }
+  document.getElementById('sets').innerHTML = '<p class="vacio">Cargando catálogo...</p>';
+  try{
+    await cargarCatalogo();
+    renderCatalogo();
+    recalcular();
+    const bajos = CATALOGO.filter(v => v.disponible <= v.alerta).length;
+    aviso(`Stock actualizado. ${bajos} variante${bajos===1?'':'s'} en nivel de reposición.`,'info');
+  } catch(e){
+    document.getElementById('sets').innerHTML = '';
+    aviso('No se pudo leer el catálogo: ' + e.message,'err');
+  }
+}
+
+// Llena las cantidades con lo que las clientas encargaron y no habia en stock
+function cargarEncargos(){
+  precargarEncargos = !precargarEncargos;
+  document.getElementById('btn-encargos').classList.toggle('on', precargarEncargos);
+  renderCatalogo();
+  recalcular();
+  const total = CATALOGO.reduce((s,v)=> s + (v.encargado||0), 0);
+  aviso(precargarEncargos
+    ? (total ? `Cargadas ${total} unidades encargadas por clientas.` : 'No hay encargos pendientes.')
+    : 'Encargos quitados del pedido.', 'info');
+}
+
+function soloReposicion(){
+  filtroReposicion = !filtroReposicion;
+  document.getElementById('btn-reposicion').classList.toggle('on', filtroReposicion);
+  renderCatalogo();
+  recalcular();
+  aviso(filtroReposicion
+    ? 'Mostrando solo lo que está en nivel de reposición.'
+    : 'Mostrando el catálogo completo.', 'info');
+}
+
+function renderCatalogo(){
+  const cont = document.getElementById('sets');
+  const abiertos = new Set([...document.querySelectorAll('.set[open]')].map(d => d.dataset.tipo));
+
+  // Conserva lo ya escrito (cantidades y costos negociados) al refrescar
+  const previo = {};
+  document.querySelectorAll('.fila').forEach(f => {
+    const c = parseInt(f.querySelector('.cant').value) || 0;
+    const costo = parseInt(f.querySelector('.costo-edit').value) || 0;
+    if(c > 0) previo[f.dataset.id] = { cant:c, costo };
+  });
+
+  cont.innerHTML = '';
+  const grupos = agruparPorProducto();
+
+  Object.entries(grupos).forEach(([producto, todas]) => {
+    // Con el filtro activo solo quedan las que ya tocan reponer
+    const lista = filtroReposicion
+      ? todas.filter(v => v.disponible <= v.alerta)
+      : todas;
+    if(!lista.length) return;
+
+    const costo = lista[0].mayor;
+    const margen = lista[0].detal - costo;
+    const enAlerta = todas.filter(v => v.disponible <= v.alerta).length;
+
+    const det = document.createElement('details');
+    det.className = 'set';
+    det.dataset.tipo = producto;
+    if(abiertos.has(producto) || filtroReposicion) det.open = true;
+
+    const sum = document.createElement('summary');
+    sum.innerHTML =
+      `<span>${producto}` +
+        (enAlerta ? ` <span class="count alerta">(${enAlerta} por reponer)</span>` : '') +
+        `<span class="meta">costo ${money(costo)} · margen ${money(margen)}</span></span>` +
+      `<span class="chev">›</span>`;
+    det.appendChild(sum);
+
+    const filas = document.createElement('div');
+    filas.className = 'filas';
+
+    lista.forEach(v => {
+      const fila = document.createElement('div');
+      fila.className = 'fila';
+      fila.dataset.id = v.id;
+      fila.dataset.costoSugerido = v.mayor;
+
+      const img = v.foto
+        ? `<img class="thumb" src="${v.foto}" alt="" loading="lazy"
+             onclick="event.stopPropagation();ampliar('${v.fotoFull}')">`
+        : `<div class="thumb-off">sin foto</div>`;
+
+      // Cantidad sugerida: lo que ya se escribio, o el encargo pendiente
+      const sugerida = previo[v.id]?.cant
+        ?? ((precargarEncargos && v.encargado > 0) ? v.encargado : '');
+
+      fila.innerHTML = img +
+        `<div class="info"><b>${v.color}</b><div class="info-linea">` +
+        `<input class="costo-edit" type="number" min="0" value="${previo[v.id]?.costo ?? v.mayor}" ` +
+          `title="Costo del catálogo: ${money(v.mayor)}. Editable si el proveedor da mejor precio." ` +
+          `onchange="marcarCostoEditado(this);recalcular()">` +
+        badgeStock(v) +
+        (v.encargado > 0 ? `<span class="stock-badge encargo">${v.encargado} encargadas</span>` : '') +
+        `</div></div>` +
+        `<input class="cant" type="number" min="0" placeholder="0" value="${sugerida}" onchange="recalcular()">`;
+      filas.appendChild(fila);
+    });
+
+    det.appendChild(filas);
+    cont.appendChild(det);
+  });
+
+  if(!cont.children.length){
+    cont.innerHTML = '<p class="vacio">Nada en nivel de reposición ahora mismo.</p>';
+  }
+}
+
+// Resalta el costo cuando el proveedor da un precio distinto al del catalogo
+function marcarCostoEditado(input){
+  const fila = input.closest('.fila');
+  const sugerido = parseInt(fila.dataset.costoSugerido);
+  input.classList.toggle('editado', parseInt(input.value) !== sugerido);
+}
+
+// Total de la compra, avisando si se pasa del presupuesto
+function recalcular(){
+  let total = 0, unidades = 0;
+  document.querySelectorAll('.fila').forEach(f => {
+    const input = f.querySelector('.cant');
+    const c = parseInt(input.value) || 0;
+    const costo = parseInt(f.querySelector('.costo-edit').value) || 0;
+    if(c > 0){
+      total += c * costo;
+      unidades += c;
+      f.classList.add('activa');
+      input.classList.add('con-valor');
+    } else {
+      f.classList.remove('activa');
+      input.classList.remove('con-valor');
+    }
+  });
+
+  const presupuesto = parseInt(document.getElementById('presupuesto').value) || 0;
+  const el = document.getElementById('total');
+  el.textContent = money(total);
+  el.className = (presupuesto && total > presupuesto) ? 'sobre' : '';
+
+  let txt = unidades === 0 ? 'Nada seleccionado aún' : `${unidades} unidades`;
+  if(presupuesto && total > presupuesto){
+    txt += ` · te pasas ${money(total - presupuesto)}`;
+  } else if(presupuesto && total > 0){
+    txt += ` · quedan ${money(presupuesto - total)}`;
+  }
+  document.getElementById('resumen-cant').textContent = txt;
+}
+
+// Registra la compra y su detalle en Airtable
+async function guardar(){
+  if(!getToken()){ aviso('Conecta tu token de Airtable antes de guardar.','err'); return; }
+
+  const items = [];
+  document.querySelectorAll('.fila').forEach(f => {
+    const c = parseInt(f.querySelector('.cant').value) || 0;
+    if(c > 0){
+      const v = CATALOGO.find(x => x.id === f.dataset.id);
+      items.push({
+        varianteId: f.dataset.id,
+        nombre: `${v.producto} · ${v.color}`,
+        cantidad: c,
+        costo: parseInt(f.querySelector('.costo-edit').value) || 0
+      });
+    }
+  });
+  if(!items.length){ aviso('Elige al menos un producto.','err'); return; }
+
+  const btn = document.getElementById('guardar');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  try{
+    // Numero consecutivo de compra
+    const q = '?maxRecords=1&sort%5B0%5D%5Bfield%5D=Numero%20de%20compra&sort%5B0%5D%5Bdirection%5D=desc';
+    const ult = await airtable('GET', T.COMPRAS, null, q);
+    const anterior = ult.records[0]?.fields?.['Numero de compra'];
+    const n = anterior ? parseInt(anterior.split('-').pop()) + 1 : 1;
+    const numero = 'C-2026-' + String(n).padStart(3,'0');
+
+    const compra = await airtable('POST', T.COMPRAS, {
+      records: [{ fields: {
+        'Numero de compra': numero,
+        'Proveedor': document.getElementById('proveedor').value.trim(),
+        'Estado': 'Pedido',
+        'Fecha del pedido': new Date().toISOString().slice(0,10),
+        'Notas': document.getElementById('notas').value.trim()
+      }}]
+    });
+    const compraId = compra.records[0].id;
+
+    // Airtable acepta maximo 10 registros por envio: se manda por tandas
+    for(let i = 0; i < items.length; i += 10){
+      const tanda = items.slice(i, i+10);
+      await airtable('POST', T.DETALLE_COMPRA, {
+        records: tanda.map((it, j) => ({ fields: {
+          'Linea': `${numero}-L${i+j+1} ${it.nombre}`,
+          'Cantidad': it.cantidad,
+          'Costo unitario': it.costo,
+          'Recibido': false,
+          'Compra': [compraId],
+          'Variante': [it.varianteId]
+        }}))
+      });
+    }
+
+    aviso(`Compra ${numero} registrada con ${items.length} líneas. ` +
+          `Marca la recepción en la app de Operación cuando llegue la mercancía.`, 'ok');
+
+    abrirCorreoResumen(numero, items);
+
+    document.querySelectorAll('.cant').forEach(i=>i.value='');
+    document.getElementById('notas').value = '';
+    recalcular();
+
+  } catch(e){
+    aviso('No se pudo guardar: ' + e.message, 'err');
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Registrar compra';
+}
+
+/*
+  RESUMEN POR CORREO
+  Abre el programa de correo del celular o computador con un mensaje ya
+  redactado, dirigido a la propia cuenta de Heart Intimates, para que desde
+  ahi se reenvie al proveedor. No requiere conectar Gmail ni nada adicional,
+  usa el enlace mailto: que entiende cualquier cliente de correo.
+*/
+function abrirCorreoResumen(numero, items){
+  const correo = document.getElementById('correo-resumen').value.trim();
+  const proveedor = document.getElementById('proveedor').value.trim();
+  const total = items.reduce((s,it) => s + it.cantidad*it.costo, 0);
+
+  const cuerpo = [
+    `Pedido al proveedor ${numero}`,
+    `Proveedor: ${proveedor}`,
+    ``,
+    ...items.map(it => `- ${it.nombre}: ${it.cantidad} unidades x ${money(it.costo)} = ${money(it.cantidad*it.costo)}`),
+    ``,
+    `Total: ${money(total)}`,
+    ``,
+    `(Generado desde la app de Heart Intimates. Reenviar al proveedor.)`
+  ].join('\n');
+
+  const asunto = `Pedido ${numero} - Heart Intimates`;
+  const mailto = `mailto:${encodeURIComponent(correo)}` +
+    `?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+
+  if(correo) window.open(mailto, '_blank');
+}
+
+// El correo se recuerda en este dispositivo, igual que el token
+function guardarCorreo(){
+  const c = document.getElementById('correo-resumen').value.trim();
+  if(c) localStorage.setItem('correo_resumen', c);
+}
+document.getElementById('correo-resumen').value = localStorage.getItem('correo_resumen') || '';
+document.getElementById('correo-resumen').addEventListener('change', guardarCorreo);
+
+document.getElementById('presupuesto').addEventListener('input', recalcular);
+actualizarBadge();
+iniciar();
+</script>
+</body>
+</html>
