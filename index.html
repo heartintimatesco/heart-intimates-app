@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heart Intimates — Tomar pedido</title>
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body class="app-cliente con-barra">
+<div class="wrap">
+
+<h1>Heart Intimates</h1>
+<p class="sub">Tomar pedido de una clienta</p>
+<div class="nav"><a href="index.html" class="activo">Pedido cliente</a><a href="pedido-proveedor.html">Pedido proveedor</a><a href="operacion.html">Operación</a>
+  <a href="dashboard.html">Panel de control</a><a href="nuevo-producto.html">Nuevo producto</a>
+  </div>
+
+<div id="msg" class="msg"></div>
+
+<!-- Conexion con Airtable: se guarda una sola vez en este celular/computador -->
+<div id="config" class="config">
+  <b>Conectar con Airtable</b> <span id="badge-conexion"></span>
+  <p style="margin:6px 0 0;color:var(--mut)">
+    Crea un token en
+    <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a>
+    con permisos <b>data.records:read</b> y <b>data.records:write</b>,
+    dando acceso solo a la base Heart Intimates. Se guarda una sola vez en este dispositivo.
+  </p>
+  <div class="config-row">
+    <input id="token" type="password" placeholder="pat...">
+    <button onclick="guardarToken()">Guardar</button>
+  </div>
+</div>
+
+<!-- Datos de la clienta -->
+<div class="card">
+  <h2>Clienta</h2>
+  <label>Nombre</label>
+  <input id="cliente" placeholder="María Fernanda G.">
+  <label>Contacto (usuario de Instagram o celular)</label>
+  <input id="contacto" placeholder="@mafe.gonzalez">
+  <label>Canal</label>
+  <select id="canal">
+    <option>Instagram</option>
+    <option>WhatsApp</option>
+    <option>Mercado Libre</option>
+    <option>Otro</option>
+  </select>
+  <label>Costo de envío (opcional, se cobra a la clienta y no afecta tu margen)</label>
+  <input id="envio" type="number" placeholder="12000">
+</div>
+
+<!-- Catalogo agrupado por producto, cada uno colapsable -->
+<div class="card">
+  <h2>Elige los productos</h2>
+  <div class="filtros">
+    <button class="alt on" id="f-todo" onclick="filtrarStock('todo')">Todo</button>
+    <button class="alt" id="f-stock" onclick="filtrarStock('stock')">En stock</button>
+    <button class="alt" id="f-agotado" onclick="filtrarStock('agotado')">Agotado</button>
+    <button class="alt" onclick="iniciar()">Actualizar</button>
+  </div>
+  <div id="sets"></div>
+</div>
+
+<div class="card">
+  <label>Notas (opcional)</label>
+  <input id="notas" placeholder="Entrega personal, sin envío">
+</div>
+
+</div>
+
+<!-- Barra fija con el total y el boton de guardar, siempre visible -->
+<div class="barra">
+  <div class="barra-inner">
+    <div class="barra-tot">
+      <small id="resumen-cant">0 productos</small>
+      <b id="total">$0</b>
+    </div>
+    <button id="guardar" onclick="guardar()">Guardar pedido</button>
+  </div>
+</div>
+
+<div id="lupa" class="lupa" onclick="this.style.display='none'">
+  <img src="" alt="Foto del conjunto">
+</div>
+
+<script src="app.js"></script>
+<script>
+/*
+  TOMAR PEDIDO DE UNA CLIENTA
+  El catalogo, los precios y las fotos se leen de Airtable al abrir (ver app.js).
+  Aqui solo vive lo propio de esta pantalla: elegir cantidades, calcular el
+  total y guardar el pedido con sus lineas.
+*/
+
+let filtroStock = 'todo';
+
+// Punto de entrada: se llama al abrir y cada vez que se toca "Actualizar"
+async function iniciar(){
+  if(!getToken()){
+    document.getElementById('sets').innerHTML =
+      '<p class="vacio">Conecta tu token de Airtable arriba para ver el catálogo.</p>';
+    return;
+  }
+  document.getElementById('sets').innerHTML = '<p class="vacio">Cargando catálogo...</p>';
+  try{
+    await cargarCatalogo();
+    renderCatalogo();
+    recalcular();
+  } catch(e){
+    document.getElementById('sets').innerHTML = '';
+    aviso('No se pudo leer el catálogo: ' + e.message, 'err');
+  }
+}
+
+function filtrarStock(f){
+  filtroStock = f;
+  ['todo','stock','agotado'].forEach(x =>
+    document.getElementById('f-'+x).classList.toggle('on', x===f));
+  renderCatalogo();
+  recalcular();
+}
+
+function renderCatalogo(){
+  const cont = document.getElementById('sets');
+  // Recuerda que secciones estaban abiertas, para no cerrarlas al refrescar
+  const abiertos = new Set([...document.querySelectorAll('.set[open]')].map(d => d.dataset.tipo));
+
+  // Guarda lo que ya iba escrito, para que actualizar no borre el pedido a medias
+  const cantidades = {};
+  document.querySelectorAll('.fila').forEach(f => {
+    const c = parseInt(f.querySelector('.cant').value) || 0;
+    if(c > 0) cantidades[f.dataset.id] = c;
+  });
+
+  const visibles = CATALOGO.filter(v => {
+    if(filtroStock === 'todo') return true;
+    return filtroStock === 'stock' ? v.disponible > 0 : v.disponible <= 0;
+  });
+
+  cont.innerHTML = '';
+  const grupos = agruparPorProducto(visibles);
+
+  Object.entries(grupos).forEach(([producto, variantes]) => {
+    const det = document.createElement('details');
+    det.className = 'set';
+    det.dataset.tipo = producto;
+    if(abiertos.has(producto)) det.open = true;
+
+    const sum = document.createElement('summary');
+    sum.innerHTML = `<span>${producto} ` +
+      `<span class="count">(${variantes.length} color${variantes.length===1?'':'es'})</span></span>` +
+      `<span class="chev">›</span>`;
+    det.appendChild(sum);
+
+    const filas = document.createElement('div');
+    filas.className = 'filas';
+
+    variantes.forEach(v => {
+      const fila = document.createElement('div');
+      fila.className = 'fila';
+      fila.dataset.id = v.id;
+      fila.dataset.precioSugerido = v.detal;
+
+      // loading="lazy": las fotos de secciones cerradas no se bajan hasta abrirlas
+      const img = v.foto
+        ? `<img class="thumb" src="${v.foto}" alt="" loading="lazy"
+             onclick="event.stopPropagation();ampliar('${v.fotoFull}')">`
+        : `<div class="thumb-off">sin foto</div>`;
+
+      fila.innerHTML = img +
+        `<div class="info"><b>${v.color}</b><div class="info-linea">` +
+        `<input class="precio-edit" type="number" min="0" value="${v.detal}" ` +
+          `title="Precio sugerido: ${money(v.detal)}. Editable para descuentos o campañas." ` +
+          `onchange="marcarPrecioEditado(this);recalcular()">` +
+        badgeStock(v) + `</div></div>` +
+        `<input class="cant" type="number" min="0" placeholder="0" ` +
+          `value="${cantidades[v.id] || ''}" onchange="recalcular()">`;
+      filas.appendChild(fila);
+    });
+
+    det.appendChild(filas);
+    cont.appendChild(det);
+  });
+
+  if(!cont.children.length){
+    cont.innerHTML = '<p class="vacio">Nada que mostrar con este filtro.</p>';
+  }
+}
+
+// Resalta el precio cuando difiere del sugerido, para que quede claro que hubo ajuste
+function marcarPrecioEditado(input){
+  const fila = input.closest('.fila');
+  const sugerido = parseInt(fila.dataset.precioSugerido);
+  input.classList.toggle('editado', parseInt(input.value) !== sugerido);
+}
+
+// Recalcula el total general y resalta las filas que ya tienen cantidad
+function recalcular(){
+  let total = 0, items = 0;
+  document.querySelectorAll('.fila').forEach(f => {
+    const input = f.querySelector('.cant');
+    const c = parseInt(input.value) || 0;
+    const p = parseInt(f.querySelector('.precio-edit').value) || 0;
+    if(c > 0){
+      total += c * p;
+      items += c;
+      f.classList.add('activa');
+      input.classList.add('con-valor');
+    } else {
+      f.classList.remove('activa');
+      input.classList.remove('con-valor');
+    }
+  });
+  const envio = parseInt(document.getElementById('envio').value) || 0;
+  document.getElementById('total').textContent = money(total + envio);
+  document.getElementById('resumen-cant').textContent =
+    items === 0 ? 'Ningún producto elegido aún' : `${items} producto${items===1?'':'s'} elegido${items===1?'':'s'}`;
+}
+
+async function siguienteNumeroPedido(){
+  const q = '?maxRecords=1&sort%5B0%5D%5Bfield%5D=Numero%20de%20pedido&sort%5B0%5D%5Bdirection%5D=desc';
+  const data = await airtable('GET', T.PEDIDOS, null, q);
+  const ultimo = data.records[0]?.fields?.['Numero de pedido'];
+  const n = ultimo ? parseInt(ultimo.split('-').pop()) + 1 : 1;
+  return 'V-2026-' + String(n).padStart(3,'0');
+}
+
+// Crea el pedido y todas sus lineas directo en Airtable
+async function guardar(){
+  if(!getToken()){ aviso('Conecta tu token de Airtable arriba antes de guardar.','err'); return; }
+
+  const cliente = document.getElementById('cliente').value.trim();
+  if(!cliente){ aviso('Escribe el nombre de la clienta.','err'); return; }
+
+  // Consolida por variante: una misma referencia nunca genera dos lineas
+  const porVariante = {};
+  document.querySelectorAll('.fila').forEach(f => {
+    const c = parseInt(f.querySelector('.cant').value) || 0;
+    if(c > 0){
+      const id = f.dataset.id;
+      const v = CATALOGO.find(x => x.id === id);
+      const precio = parseInt(f.querySelector('.precio-edit').value) || 0;
+      if(porVariante[id]){
+        porVariante[id].cantidad += c;
+      } else {
+        porVariante[id] = {
+          varianteId: id,
+          nombre: `${v.producto} · ${v.color}`,
+          cantidad: c,
+          precio
+        };
+      }
+    }
+  });
+  const items = Object.values(porVariante);
+  if(!items.length){ aviso('Elige al menos un producto.','err'); return; }
+
+  // Lo que supera el stock disponible queda registrado como encargo
+  const faltantes = items.filter(it => {
+    const v = CATALOGO.find(x => x.id === it.varianteId);
+    return v && it.cantidad > v.disponible;
+  }).map(it => {
+    const v = CATALOGO.find(x => x.id === it.varianteId);
+    return { ...it, disponible: v.disponible, faltan: it.cantidad - v.disponible };
+  });
+
+  if(faltantes.length){
+    const detalle = faltantes.map(f =>
+      `· ${f.nombre}: pide ${f.cantidad}, hay ${f.disponible} (faltan ${f.faltan})`).join('\n');
+    if(!confirm(`No hay stock suficiente de:\n\n${detalle}\n\n` +
+      `¿Guardar el pedido igual? Las unidades que faltan quedarán registradas ` +
+      `como encargo para pedirlas al proveedor.`)) return;
+  }
+
+  const btn = document.getElementById('guardar');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  try{
+    const numero = await siguienteNumeroPedido();
+
+    const pedido = await airtable('POST', T.PEDIDOS, {
+      records: [{ fields: {
+        'Numero de pedido': numero,
+        'Cliente': cliente,
+        'Contacto': document.getElementById('contacto').value.trim(),
+        'Canal': document.getElementById('canal').value,
+        'Estado': 'Nuevo',
+        'Fecha': new Date().toISOString().slice(0,10),
+        'Costo de envio': parseInt(document.getElementById('envio').value) || 0,
+        'Notas': document.getElementById('notas').value.trim()
+      }}]
+    });
+    const pedidoId = pedido.records[0].id;
+
+    // Airtable acepta maximo 10 registros por envio: se manda por tandas
+    for(let i = 0; i < items.length; i += 10){
+      const tanda = items.slice(i, i+10);
+      await airtable('POST', T.DETALLE_VENTA, {
+        records: tanda.map((it, j) => ({ fields: {
+          'Linea': `${numero}-L${i+j+1} ${it.nombre}`,
+          'Cantidad': it.cantidad,
+          'Precio unitario': it.precio,
+          'Pedido': [pedidoId],
+          'Variante': [it.varianteId]
+        }}))
+      });
+    }
+
+    // Registra como encargo lo que no alcanzo el stock, para el proximo pedido al proveedor
+    if(faltantes.length){
+      const hoy = new Date().toISOString().slice(0,10);
+      await airtable('PATCH', T.VARIANTES, {
+        records: faltantes.map(f => {
+          const v = CATALOGO.find(x => x.id === f.varianteId);
+          return {
+            id: f.varianteId,
+            fields: {
+              'Encargado por clientas': (v?.encargado || 0) + f.faltan,
+              'Notas de encargo': `${hoy} · ${cliente}: ${f.faltan} und (pedido ${numero})`
+            }
+          };
+        })
+      });
+    }
+
+    const extra = faltantes.length
+      ? ` Se registraron ${faltantes.length} encargo${faltantes.length>1?'s':''} para el próximo pedido al proveedor.`
+      : '';
+    aviso('Pedido ' + numero + ' guardado en Airtable.' + extra, 'ok');
+
+    ['cliente','contacto','envio','notas'].forEach(i=>document.getElementById(i).value='');
+    document.querySelectorAll('.cant').forEach(i=>i.value='');
+    document.querySelectorAll('.set').forEach(d=>d.open=false);
+    recalcular();
+    iniciar();   // vuelve a leer el stock, que acaba de cambiar
+
+  } catch(e){
+    aviso('No se pudo guardar: ' + e.message, 'err');
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Guardar pedido';
+}
+
+document.getElementById('envio').addEventListener('input', recalcular);
+actualizarBadge();
+iniciar();
+</script>
+</body>
+</html>
